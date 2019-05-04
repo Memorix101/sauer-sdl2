@@ -1,6 +1,7 @@
 // main.cpp: initialisation & main loop
 
 #include "engine.h"
+#include "controllerdb.h"
 
 extern void cleargamma();
 
@@ -17,6 +18,7 @@ void cleanup()
     extern void clear_console(); clear_console();
     extern void clear_mdls();    clear_mdls();
     extern void clear_sound();   clear_sound();
+    extern void clear_syncwin(); clear_syncwin();
     closelogfile();
     SDL_Quit();
 }
@@ -475,6 +477,273 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     swapbuffers(false);
 }
 
+int selectedcontrollernum = -1;
+int selectedcontrollerid = -1;
+void changepad();
+VARF(selectedpad, 0, 0, 100, changepad());
+int ngamecontrollers = 0;
+SDL_GameController **gamecontrollers = NULL;
+const int maxhaptics = 10;
+int nhaptics = 0;
+SDL_Haptic **haptics = NULL;
+vector<char *> hapticsnames;
+
+void reconfiguregamepads();
+void reconfigurehaptics();
+void resetpaddata();
+
+VARFP(gamepad, 0, 0, 1, reconfiguregamepads());
+XIDENTHOOK(gamepad, IDF_EXTENDED);
+
+VARFP(haptic, 0, 0, 1, reconfigurehaptics());
+XIDENTHOOK(haptic, IDF_EXTENDED);
+
+void getpadname(int &i) {
+    if(i<0 || i>=ngamecontrollers || !gamecontrollers[i]) {
+        return result("N/A");
+    }
+    result(SDL_GameControllerName(gamecontrollers[i]));
+}
+
+void gethapticname(int &i) {
+    if(i>=nhaptics || i<0 || !hapticsnames[i]) {
+        return result("N/A");
+    }
+    result(hapticsnames[i]);
+}
+
+ICOMMAND(getnumpads, "", (), intret(ngamecontrollers))
+COMMAND(getpadname, "i");
+
+ICOMMAND(getnumhaptics, "", (), intret(nhaptics))
+COMMAND(gethapticname, "i");
+
+SVARP(gamecontroller, "");
+XIDENTHOOK(gamecontroller, IDF_EXTENDED);
+
+void setcontrollerids(int num, int id) {
+    selectedpad = num;
+    selectedcontrollernum = num;
+    selectedcontrollerid = id;
+}
+
+void clearcontrollerids() {
+    selectedcontrollernum = -1;
+    selectedcontrollerid = -1;
+    selectedpad = -1;
+}
+
+void initgamecontrollers(int enable) {
+    resetpaddata();
+    clearcontrollerids();
+    if(ngamecontrollers && gamecontrollers) {
+        loopi(ngamecontrollers) {
+            if(gamecontrollers[i])
+                SDL_GameControllerClose(gamecontrollers[i]);
+        }
+        ngamecontrollers = 0;
+        delete[] gamecontrollers;
+        gamecontrollers = NULL;
+    }
+    if(enable) {
+        char guid_str[MAXSTRLEN];
+        ngamecontrollers = SDL_NumJoysticks();
+        if(ngamecontrollers <= 0) return;
+        SDL_RWops* bindings = SDL_RWFromConstMem(gamepadmappingsdb, strlen(gamepadmappingsdb));
+        SDL_GameControllerAddMappingsFromRW(bindings, 1);
+        const char* s = findfile("gamecontrollerdb.txt","r");
+        if(s) SDL_GameControllerAddMappingsFromFile(s);
+        gamecontrollers = new SDL_GameController*[ngamecontrollers];
+        loopi(ngamecontrollers) {
+            gamecontrollers[i] = SDL_GameControllerOpen(i);
+            if(gamecontrollers[i]) {
+                SDL_Joystick* j = SDL_GameControllerGetJoystick(gamecontrollers[i]);
+                int id = SDL_JoystickInstanceID(j);
+                SDL_JoystickGUID guid = SDL_JoystickGetGUID(j);
+                SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
+                if(!strcmp(gamecontroller, guid_str)) {
+                    setcontrollerids(i, id);
+                }
+            } else {
+                conoutf("Failed to setup gamepad (%d): %s", i , SDL_GetError());
+            }
+        }
+        if(ngamecontrollers > 0 && selectedcontrollernum < 0) {
+            if(gamecontrollers[0]) {
+                conoutf("Setting '%s' as the main gamepad.",  SDL_GameControllerName(gamecontrollers[0]));
+                selectedcontrollernum = 0;
+                SDL_Joystick* j = SDL_GameControllerGetJoystick(gamecontrollers[0]);
+                SDL_JoystickGUID guid = SDL_JoystickGetGUID(j);
+                int id = SDL_JoystickInstanceID(j);
+                SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
+                setsvar("gamecontroller", guid_str);
+                setcontrollerids(0, id);
+            }
+        }
+    }
+}
+
+void changepad() {
+    int num = selectedpad;
+    if(num < 0 || num >= ngamecontrollers || !gamecontrollers[num]) {
+        selectedpad = -1;
+        return;
+    }
+    char guid_str[MAXSTRLEN];
+    SDL_Joystick* j = SDL_GameControllerGetJoystick(gamecontrollers[num]);
+    SDL_JoystickGUID guid = SDL_JoystickGetGUID(j);
+    SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
+    setsvar("gamecontroller", guid_str);
+    reconfiguregamepads();
+}
+
+VARP(haptic0Mode, 0, 0, 3);
+XIDENTHOOK(haptic0Mode, IDF_EXTENDED);
+VARP(haptic0Cap, 0, 50, 100);
+XIDENTHOOK(haptic0Cap, IDF_EXTENDED);
+
+VARP(haptic1Mode, 0, 0, 3);
+XIDENTHOOK(haptic1Mode, IDF_EXTENDED);
+VARP(haptic1Cap, 0, 50, 100);
+XIDENTHOOK(haptic1Cap, IDF_EXTENDED);
+
+VARP(haptic2Mode, 0, 0, 3);
+XIDENTHOOK(haptic2Mode, IDF_EXTENDED);
+VARP(haptic2Cap, 0, 50, 100);
+XIDENTHOOK(haptic2Cap, IDF_EXTENDED);
+
+VARP(haptic3Mode, 0, 0, 3);
+XIDENTHOOK(haptic3Mode, IDF_EXTENDED);
+VARP(haptic3Cap, 0, 50, 100);
+XIDENTHOOK(haptic3Cap, IDF_EXTENDED);
+
+VARP(haptic4Mode, 0, 0, 3);
+XIDENTHOOK(haptic4Mode, IDF_EXTENDED);
+VARP(haptic4Cap, 0, 50, 100);
+XIDENTHOOK(haptic4Cap, IDF_EXTENDED);
+
+VARP(haptic5Mode, 0, 0, 3);
+XIDENTHOOK(haptic5Mode, IDF_EXTENDED);
+VARP(haptic5Cap, 0, 50, 100);
+XIDENTHOOK(haptic5Cap, IDF_EXTENDED);
+
+VARP(haptic6Mode, 0, 0, 3);
+XIDENTHOOK(haptic6Mode, IDF_EXTENDED);
+VARP(haptic6Cap, 0, 50, 100);
+XIDENTHOOK(haptic6Cap, IDF_EXTENDED);
+
+VARP(haptic7Mode, 0, 0, 3);
+XIDENTHOOK(haptic7Mode, IDF_EXTENDED);
+VARP(haptic7Cap, 0, 50, 100);
+XIDENTHOOK(haptic7Cap, IDF_EXTENDED);
+
+VARP(haptic8Mode, 0, 0, 3);
+XIDENTHOOK(haptic8Mode, IDF_EXTENDED);
+VARP(haptic8Cap, 0, 50, 100);
+XIDENTHOOK(haptic8Cap, IDF_EXTENDED);
+
+VARP(haptic9Mode, 0, 0, 3);
+XIDENTHOOK(haptic9Mode, IDF_EXTENDED);
+VARP(haptic9Cap, 0, 50, 100);
+XIDENTHOOK(haptic9Cap, IDF_EXTENDED);
+
+
+void makehapticcapname(int &num) {
+    static char cmdbuff[MAXSTRLEN];
+    snprintf(cmdbuff, MAXSTRLEN, "haptic%dCap", num);
+    result(cmdbuff);
+}
+
+void makehapticmodename(int &num) {
+    static char cmdbuff[MAXSTRLEN];
+    snprintf(cmdbuff, MAXSTRLEN, "haptic%dMode" , num);
+    result(cmdbuff);
+}
+
+COMMAND(makehapticcapname, "i");
+COMMAND(makehapticmodename, "i");
+
+int gethapticcap(int num) {
+    if(num < 0 || num >= maxhaptics) return 0;
+    static char cmdbuff[MAXSTRLEN];
+    snprintf(cmdbuff, MAXSTRLEN, "$haptic%dCap", num);
+    if(num < 0 || num >= maxhaptics) return 0;
+    const char* result = executestr(cmdbuff);
+    if(!result) return 0;
+    int v = parseint(result);
+    DELETEA(result);
+    return v;
+}
+
+int gethapticmode(int num) {
+    if(num < 0 || num >= maxhaptics) return 0;
+    static char cmdbuff[MAXSTRLEN];
+    snprintf(cmdbuff, MAXSTRLEN, "$haptic%dMode", num);
+    const char* result = executestr(cmdbuff);
+    if(!result) return 0;
+    int v = parseint(result);
+    DELETEA(result);
+    return v;
+}
+
+ICOMMAND(gethapticmode, "i", (int &i), intret(gethapticmode(i)));
+ICOMMAND(gethapticcap, "i", (int &i), intret(gethapticcap(i)));
+
+void rumblehaptics(int mode, int power, int duration) {
+    power = clamp(power, 0, 100);
+    duration = clamp(duration, 0, 1000);
+    loopi(nhaptics) {
+        if(gethapticmode(i) & mode) {
+            if(haptics[i]) {
+                SDL_HapticRumblePlay(haptics[i], power * gethapticcap(i)/10000.0, duration);
+            }
+        }
+    }
+}
+
+void inithaptics(int enable) {
+    if(nhaptics && haptics) {
+        hapticsnames.deletearrays();
+        loopi(nhaptics) {
+            if(haptics[i])
+                SDL_HapticClose(haptics[i]);
+        }
+        nhaptics = 0;
+        delete[] haptics;
+        haptics = NULL;
+    }
+    if(enable) {
+        nhaptics = SDL_NumHaptics();
+        if(nhaptics <= 0) return;
+        nhaptics = clamp(nhaptics, 0, maxhaptics);
+        haptics = new SDL_Haptic*[nhaptics];
+        loopi(nhaptics) {
+            haptics[i] = SDL_HapticOpen(i);
+            if(haptics[i]) {
+                SDL_HapticRumbleInit(haptics[i]);
+            }
+        }
+        loopi(nhaptics) {
+            const char *name = SDL_HapticName(i);
+            char *str = new char[MAXSTRLEN];
+            snprintf(str, MAXSTRLEN, "%s", (name ? name : "N/A"));
+            hapticsnames.add(str);
+        }
+    }
+}
+
+void reconfiguregamepads() {
+    if(initing < INIT_LOAD) {
+        initgamecontrollers(gamepad);
+    }
+}
+
+void reconfigurehaptics() {
+    if(initing < INIT_LOAD) {
+        inithaptics(haptic);
+    }
+}
+
 VARNP(relativemouse, userelativemouse, 0, 1, 1);
 XIDENTHOOK(relativemouse, IDF_EXTENDED);
 
@@ -612,7 +881,7 @@ void cleargamma()
 
 VAR(dbgmodes, 0, 0, 1);
 
-VARP(tearfree_method, 0, 0, 2);
+VARP(tearfree_method, 1, 1, 1);
 XIDENTHOOK(tearfree_method, IDF_EXTENDED);
 
 struct SyncWindow
@@ -675,20 +944,20 @@ int syncwindow_threadfn(void *data)
     int synctype = obj->synctype;
     glXGetVideoSyncSGI_fn getsyncstamp = NULL;
     glXWaitVideoSyncSGI_fn waitforsync = NULL;
-    int i = 0;
 
-    if(synctype == 1 || synctype == 2) {
-        if(synctype == 1 || synctype == 2) {
+    if(synctype == 1) {
+        if(synctype == 1) {
             obj->window = SDL_CreateWindow("Sync Window", 0, 0, 100, 100, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
             SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
             obj->glcontext = SDL_GL_CreateContext(obj->window);
             glFinish();
         }
+        int i = 0;
         while(SDL_GL_MakeCurrent(obj->window, obj->glcontext)) {
             sleepwrapper(0,250000000);
             i++;
             if(debugsyncthreadinfo) conoutf("Setting GL context failed (attempt %d), error: %s", i, SDL_GetError());
-            if(i >= 20) {
+            if(i >= 5) {
                 conoutf("Setting GL context error, tearfree is disabled");
                 obj->isbroken++;
                 return -1;
@@ -697,12 +966,10 @@ int syncwindow_threadfn(void *data)
         if(i && debugsyncthreadinfo) {
             conoutf("Setting GL context success (attempt %d)", i+1);
         }
-        i = 0;
     }
 
-    bool is_init = false;
-    if(synctype == 2) {
-        SDL_GL_SetSwapInterval(1);
+    if(synctype == 1) {
+        SDL_GL_SetSwapInterval(0);
     }
 
     uint sync_counter = 0;
@@ -720,40 +987,18 @@ int syncwindow_threadfn(void *data)
             obj->isbroken++;
             return -1;
         }
-        is_init = true;
     }
 
+    if(debugsyncthreadinfo) conoutf("Sync Window thread started.");
     while(true) {
 
         if(obj->killthread) {
             if(synctype == 1 || synctype == 2) {
                 SDL_GL_DeleteContext(obj->glcontext);
                 SDL_DestroyWindow(obj->window);
+                if(debugsyncthreadinfo) conoutf("Sync Window destroyed.");
             }
             return 0;
-        }
-
-        if(synctype == 2) {
-            if(!is_init) {
-                if(SDL_GL_GetCurrentWindow() != obj->window || SDL_GL_GetCurrentContext() != obj->glcontext || ! SDL_GL_GetSwapInterval()) {
-                    i++;
-                    if(debugsyncthreadinfo) conoutf("GL context params mismatch (attempt %d)", i);
-                    if(i > 20) {
-                        conoutf("Setting GL params failed, tearfree is disabled");
-                        obj->isbroken++;
-                        return -1;
-                    }
-                    SDL_GL_MakeCurrent(obj->window, obj->glcontext);
-                    SDL_GL_SetSwapInterval(1);
-                    sleepwrapper(0, 250000000);
-                    continue;
-                } else {
-                    if(i && debugsyncthreadinfo) conoutf("GL context params are set (attempt %d)", i+1);
-                    is_init = true;
-                }
-            }
-            SDL_GL_SwapWindow(obj->window);
-            glFinish();
         }
 
         if(synctype == 1) {
@@ -807,9 +1052,15 @@ SyncWindow::~SyncWindow()
 SyncWindow *syncwin;
 
 bool checksyncwin() {
-    if(!syncwin) return false;
-    if(!syncwin->isconstructed || syncwin->isbroken) return false;
+    if(!syncwin || !syncwin->isconstructed || syncwin->isbroken) return false;
     return true;
+}
+
+void clear_syncwin() {
+    if(syncwin) {
+        delete syncwin;
+        syncwin = NULL;
+    }
 }
 
 void setupscreen(int &useddepthbits, int &usedfsaa)
@@ -1094,6 +1345,284 @@ void checkunfocused(SDL_Event event) {
     hasalt = false;
 }
 
+VARP(stickdeadzone, 0, 20, 50);
+XIDENTHOOK(stickdeadzone, IDF_EXTENDED);
+
+VARP(stickpadlevel, 10, 50, 90);
+XIDENTHOOK(stickpadlevel, IDF_EXTENDED);
+
+VARP(sticksens, 1, 25, 100);
+XIDENTHOOK(sticksens, IDF_EXTENDED);
+
+VARP(sticksenscurve, 0, 20, 100);
+XIDENTHOOK(sticksenscurve, IDF_EXTENDED);
+
+VARP(triggerlevel, 10, 75, 100);
+XIDENTHOOK(triggerlevel, IDF_EXTENDED);
+
+const int maxstickval = 32767;
+
+int gettriggerdz() {
+    return maxstickval * (triggerlevel/100.0);
+}
+
+int getstickpaddz() {
+    return maxstickval * (stickpadlevel/100.0);
+}
+
+int getstickdzmagnitude() {
+    return maxstickval * (stickdeadzone/100.0);
+}
+
+extern void execgamepadbind(const char* name, bool isdown);
+
+struct TriggerInfo {
+    hashset<const char*> activetriggers;
+    void on(const char* name) {
+        if(isactive(name)) return;
+        activetriggers[name] = name;
+        execgamepadbind(name, true);
+    }
+    void off(const char* name) {
+        if(isactive(name)) {
+            activetriggers.remove(name);
+            execgamepadbind(name, false);
+        }
+    }
+    bool isactive(const char* name) {
+        const char* c = activetriggers.find(name, NULL);
+        return c ? true : false;
+    }
+    void stopall() {
+        enumerate(activetriggers, const char*, name,
+                  { execgamepadbind(name, false); });
+        activetriggers.clear();
+    }
+} triggerinfo;
+
+struct AxisInfo {
+    hashtable<const char*, int> axisvalues;
+    hashset<const char*> activeaxis;
+    hashtable<const char*, const char*> pairs;
+    AxisInfo() {
+        pairs["rightx"] = "righty";
+        pairs["righty"] = "rightx";
+        pairs["lefty"] = "leftx";
+        pairs["leftx"] = "lefty";
+    }
+    void add(const char* name, int val) {
+        axisvalues[name] = val;
+    }
+    int getvalue(const char* name) {
+        int v = axisvalues.find(name, 0);
+        if(!v) return 0;
+        return v; 
+    }
+    const char* findpair(const char* name) {
+        return pairs.find(name, NULL);
+    }
+    int getpairvalue(const char* name) {
+        const char* pairname = pairs.find(name, NULL);
+        if(!pairname) return 0;
+        return getvalue(pairname);
+    }
+    void setactive(const char* name) {
+        const char* pair = findpair(name);
+        activeaxis[name] = name;
+        activeaxis[pair] = pair;
+    }
+    void setinactive(const char* name) {
+        const char* pair = findpair(name);
+        activeaxis.remove(name);
+        activeaxis.remove(pair);
+    }
+    bool isactive(const char* name) {
+        const char* pair = findpair(name);
+        const char* c1 = activeaxis.find(name, NULL);
+        const char* c2 = activeaxis.find(pair, NULL);
+        return c1 && c2;
+    }
+    void stopall() {
+        axisvalues.clear();
+        activeaxis.clear();
+    }
+} axisinfo;
+
+static bool checkrange(double val, double min, double max) {
+    return val >= min && val <= max;
+}
+
+struct AxisButtonsInfo {
+    hashset<const char*> activebuttons;
+    hashset<const char*> activatebuttons;
+    void setactivate(double a) {
+        activatebuttons.clear();
+        if(checkrange(a, 22.5, 157.5)) {
+            activatebuttons["spleft"] = "spleft";
+        }
+        if(checkrange(a, 112.5, 247.5)) {
+            activatebuttons["spdown"] = "spdown";
+        }
+        if(checkrange(a, 202.5, 337.5)) {
+            activatebuttons["spright"] = "spright";
+        }
+        if(checkrange(a, 0, 67.5) || checkrange(a, 292.5, 360.0)) {
+            activatebuttons["spup"] = "spup";
+        }
+    }
+    void update(double angle) {
+        setactivate(angle);
+        enumerate(activatebuttons, const char*, name,
+                  {
+                      if(!activebuttons.find(name, NULL)) {
+                          execgamepadbind(name, true);
+                          activebuttons[name] = name;
+                      }
+                  });
+        enumerate(activebuttons, const char*, name,
+                  {
+                      if(!activatebuttons.find(name, NULL)) {
+                          execgamepadbind(name, false);
+                          activebuttons.remove(name);
+                      }
+                  });
+        activatebuttons.clear();
+    }
+    void stopall() {
+        enumerate(activebuttons, const char*, name,
+                  { execgamepadbind(name, false); });
+        activebuttons.clear();
+        activatebuttons.clear();
+    }
+} axisbuttonsinfo;
+
+const char* getaxisname(SDL_ControllerAxisEvent caxis) {
+    return SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)caxis.axis);
+}
+
+const char* getbuttonname(SDL_ControllerButtonEvent cbutton) {
+    return SDL_GameControllerGetStringForButton((SDL_GameControllerButton)cbutton.button);
+}
+
+bool isdzactive(const char* name, int dz) {
+    long v = abs(axisinfo.getvalue(name));
+    long vp = abs(axisinfo.getpairvalue(name));
+    long l = sqrt(pow(v,2) + pow(vp,2));
+    return l < dz;
+}
+
+double clampedstickvel(const char* name) {
+    int v = axisinfo.getvalue(name);
+    long vp = axisinfo.getpairvalue(name);
+    int dz = getstickdzmagnitude();
+    long l = sqrt(pow(v,2) + pow(vp,2));
+    long la = l - dz;
+    if(la <= 0.0) return 0.0;
+    long vd = dz*abs(v)/l;
+    double activeval = (double)(v < 0 ? v+vd : v-vd);
+    double activescale = (double)(maxstickval-dz);
+    double result = clamp(activeval/activescale, -1.0, 1.0);
+    return result; 
+}
+
+double getbuttonemulationangle(const char* name) {
+    double x, y;
+    if(!strcmp(name, "leftx")) {
+        x = clampedstickvel(name);
+        y = clampedstickvel(axisinfo.findpair(name));
+    } else {
+        x = clampedstickvel(axisinfo.findpair(name));
+        y = clampedstickvel(name);
+    }
+    double l = sqrt(pow(x,2) + pow(y,2));
+    double f = acos(y/l) * 180.0 / PI;
+    return (x<0.0 ? -f : f) + 180.0;
+}
+
+bool istrigger(SDL_ControllerAxisEvent caxis) {
+    const char* axisname = getaxisname(caxis);
+    if(!strcmp(axisname, "lefttrigger") || !strcmp(axisname, "righttrigger")) {
+        return true;
+    }
+    return false;
+}
+
+bool isbuttonemulation(SDL_ControllerAxisEvent caxis) {
+    const char* axisname = getaxisname(caxis);
+    if(!strcmp(axisname, "leftx") || !strcmp(axisname, "lefty")) {
+        return true;
+    }
+    return false;
+}
+
+void caxismove(SDL_ControllerAxisEvent caxis) {
+    if(caxis.which != selectedcontrollerid) return;
+    int val = clamp(caxis.value, -maxstickval, maxstickval);
+    const char* name = getaxisname(caxis);
+    if(istrigger(caxis)) {
+        int dz = gettriggerdz();
+        if(val > dz) {
+            triggerinfo.on(name);
+        } else {
+            triggerinfo.off(name);
+        }
+    } else if(isbuttonemulation(caxis)) {
+        axisinfo.add(name, val);
+        bool activedz = isdzactive(name, getstickpaddz());
+        if(!activedz) {
+            axisinfo.setactive(name);
+            axisbuttonsinfo.update(getbuttonemulationangle(name));
+        } else if(axisinfo.isactive(name)) {
+            axisinfo.setinactive(name);
+            axisbuttonsinfo.stopall();
+        }
+    } else {
+        axisinfo.add(name, val);
+        bool activedz = isdzactive(name, getstickdzmagnitude());
+        if(!activedz) {
+            axisinfo.setactive(name);
+        } else if(axisinfo.isactive(name)) {
+            axisinfo.setinactive(name);
+        }
+    }
+}
+
+void cbuttonevent(SDL_ControllerButtonEvent cbutton) {
+    if(cbutton.which != selectedcontrollerid) return;
+    if(!isfocused) return;
+    if(cbutton.state == SDL_RELEASED) {
+        execgamepadbind(getbuttonname(cbutton), false);
+    } else {
+        execgamepadbind(getbuttonname(cbutton), true);
+    }
+}
+
+static double xstickrestmovement = 0.0;
+static double ystickrestmovement = 0.0;
+
+void processgamepad() {
+    if(!gamepad || selectedcontrollernum==-1) return;
+    double velx = clampedstickvel("rightx");
+    double vely = clampedstickvel("righty");
+    double pcurve = (10.0 + sticksenscurve)/10.0;
+    velx *= pow(pcurve, fabs(velx))/(double)pcurve;
+    vely *= pow(pcurve, fabs(vely))/(double)pcurve;
+    double xmotion = velx*elapsedtime*sticksens + xstickrestmovement;
+    double ymotion = vely*elapsedtime*sticksens + ystickrestmovement;
+    double dx, dy;
+    xstickrestmovement = modf(xmotion, &dx);
+    ystickrestmovement = modf(ymotion, &dy);
+    if(!g3d_movecursorstick((int)dx, (int)dy)) stickmove((int)dx, (int)dy);
+}
+
+void resetpaddata() {
+    xstickrestmovement = 0.0;
+    ystickrestmovement = 0.0;
+    triggerinfo.stopall();
+    axisinfo.stopall();
+    axisbuttonsinfo.stopall();
+}
+
 void checkinput()
 {
     SDL_Event event;
@@ -1201,6 +1730,18 @@ void checkinput()
                 else if(event.wheel.y < 0) { processkey(-5, true); processkey(-5, false); }
                 if(event.wheel.x > 0) { processkey(-35, true); processkey(-35, false); }
                 else if(event.wheel.x < 0) { processkey(-36, true); processkey(-36, false); }
+                break;
+            case SDL_JOYDEVICEADDED:
+            case SDL_JOYDEVICEREMOVED:
+                reconfiguregamepads();
+                reconfigurehaptics();
+                break;
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+                cbuttonevent(event.cbutton);
+                break;
+            case SDL_CONTROLLERAXISMOTION:
+                caxismove(event.caxis);
                 break;
         }
     }
@@ -1336,7 +1877,7 @@ int getfpsalt(int id)
     return currentfps[n];
 }
 
-VARP(tearfree_expectedtimererror, 0, 200, 1000);
+VARP(tearfree_expectedtimererror, 0, 200, 1000000);
 XIDENTHOOK(tearfree_expectedtimererror, IDF_EXTENDED);
 
 VARP(tearfree_allowbusywait, 0, 1, 1);
@@ -1400,23 +1941,19 @@ void limitfpsalt(ullong &tick_now)
     if(!vsync && tearfree) {
         if(!syncwin) syncwin = new SyncWindow;
         if(!checksyncwin()) {
-            delete syncwin;
-            syncwin = NULL;
+            clear_syncwin();
             tearfree = 0;
             return limitfpsalt(tick_now);
         }
         if(tearfree_method && (syncwin->synctype != tearfree_method)) {
-            delete syncwin;
+            clear_syncwin();
             syncwin = new SyncWindow;
             return limitfpsalt(tick_now);
         }
         fpslimit = 1;
         nextdraw = calcnextdraw(lastdraw, tick_now);
     } else {
-        if(syncwin) {
-            delete syncwin;
-            syncwin = NULL;
-        }
+        clear_syncwin();
         fpslimit = (mainmenu || minimized) && menufps ? (maxfps ? min(maxfps, menufps) : menufps) : maxfps;
         nextdraw = (fpslimit ? 1000000000ULL / fpslimit : 0) + lastdraw;
         updatefpsalt(5, 0);
@@ -1572,17 +2109,8 @@ int getclockmillis()
 
 VAR(numcpus, 1, 1, 16);
 
-struct args {
-    int argc;
-    char** argv;
-};
-
-int gameloop (void* p)
+int gameloop (int argc, char** argv)
 {
-    struct args* a = (struct args*)p;
-    int argc = a->argc;
-    char** argv = a->argv;
-
     setlogfile(NULL);
 
     int dedicated = 0;
@@ -1662,8 +2190,8 @@ int gameloop (void* p)
     {
         logoutf("init: sdl");
 
-        if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0) fatal("Unable to initialize SDL: %s", SDL_GetError());
-
+        if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_JOYSTICK|SDL_INIT_GAMECONTROLLER|SDL_INIT_HAPTIC)<0)
+            fatal("Unable to initialize SDL: %s", SDL_GetError());
         SDL_version compiled;
         SDL_version linked;
         SDL_VERSION(&compiled);
@@ -1784,7 +2312,7 @@ int gameloop (void* p)
     inputgrab(grabinput = true);
     ignoremousemotion();
 
-    conoutf("\f0Sauerbraten SDL2 Client\f1 Version 2.2.1");
+    conoutf("\f0Sauerbraten SDL2 Client\f1 Version 2.3.3");
 
     ullong prevcycletime = 0;
     for(;;)
@@ -1796,6 +2324,7 @@ int gameloop (void* p)
             limitfpsalt(tick);
             millis = getclockmillis();
         } else {
+            clear_syncwin();
             limitfps(millis, totalmillis);
         }
         elapsedtime = millis - totalmillis;
@@ -1810,6 +2339,7 @@ int gameloop (void* p)
         updatetime();
  
         checkinput();
+        processgamepad();
         menuprocess();
         tryedit();
 
@@ -1903,11 +2433,7 @@ int main(int argc, char **argv)
     signal(SIGABRT, handler);
     #endif
 
-    struct args a;
-    a.argc = argc;
-    a.argv = argv;
-    SDL_Thread* main_thread = SDL_CreateThread(gameloop, "mainloop", (void *)(&a));
-    SDL_WaitThread(main_thread, NULL);
+    gameloop(argc, argv);
 
     ASSERT(0);   
     return EXIT_FAILURE;

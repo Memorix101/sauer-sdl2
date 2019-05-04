@@ -367,6 +367,22 @@ static const struct guninfo { int sound, attackdelay, damage, spread, projspeed,
     { -1,            0, 120,   0,   0,  0,    0,  1,  80, 40,    0, "barrel",          NULL,     0 }
 };
 
+static const struct gunrumbleinfo { int id, power, duration; } gunsrumble[NUMGUNS] =
+{
+    { S_PUNCH1,     50, 100},
+    { S_SG,        100, 150},
+    { S_CG,         25, 50},
+    { S_RLFIRE,     50, 100},
+    { S_RIFLE,     100, 150},
+    { S_FLAUNCH,    50, 100},
+    { S_PISTOL,     50, 100},
+    { S_FLAUNCH,     0,   0},
+    { S_ICEBALL,     0,   0},
+    { S_SLIMEBALL,   0,   0},
+    { S_PIGR1,       0,   0},
+    { -1,            0,   0}
+};
+
 #include "ai.h"
 
 // inherited by fpsent and server clients
@@ -730,7 +746,7 @@ struct extplayerdata {
 };
 
 #define MAXPREVIEWPLAYERS 128
-#define SERVUPDATEINTERVAL 3000
+#define SERVUPDATEINTERVAL 5000
 #define SERVUPDATETEAMGAP 500
 
 struct serverpreviewdata {
@@ -798,7 +814,7 @@ struct serverpreviewdata {
 
 #define MAXEXTRETRIES 2
 #define EXTRETRIESINT 500
-#define EXTREFRESHINT 3000
+#define EXTREFRESHINT 15000
 struct extplayerinfo
 {
     bool finished;
@@ -1106,6 +1122,7 @@ namespace game
     extern void sendmapinfo();
     extern void stopdemo();
     extern void changemap(const char *name, int mode);
+    extern void forceintermission();
     extern void c2sinfo(bool force = false);
     extern void sendposition(fpsent *d, bool reliable = false);
 

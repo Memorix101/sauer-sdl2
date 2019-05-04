@@ -599,6 +599,7 @@ namespace game
         return NULL;
     }
 
+    extern int showserveracc;
     extern vector<fpsent *> clients;
     void checkextinfos()
     {
@@ -609,8 +610,13 @@ namespace game
             fpsent * d = clients[i];
             if(!d) continue;
             if(d->extdata.needretry()) {
-                d->extdata.addattempt();
-                requestextinfo(d->clientnum);
+                if(showserveracc) {
+                    d->extdata.addattempt();
+                    requestextinfo(d->clientnum);
+                } else if(!d->extdata.finished) {
+                    d->extdata.addattempt();
+                    requestextinfo(d->clientnum);
+                }
             }
         }
         if(player1->extdata.needretry()) {
@@ -891,6 +897,7 @@ namespace game
 
         if(autofollowflagcarrier && statechanged) {
             int owner = -1;
+            int newfollow = -1;
             fpsent* fo = NULL;
             loopv(ctfmode.flags) {
                 fo = ctfmode.flags[i].owner;
@@ -902,20 +909,21 @@ namespace game
                     continue;
                 }
                 if(owner == f->clientnum) {
+                    newfollow = -1;
                     return;
                 }
                 if(autofollowonlysameteam && m_teammode) {
                     fpsent* c = clients[owner];
                     if(c && isteam(f->team, c->team)) {
-                        possiblefollow = owner;
-                        eventtime = current_tick;
-                        break;
+                        newfollow = owner;
                     }
                 } else {
-                    possiblefollow = owner;
-                    eventtime = current_tick;
-                    break;
+                    newfollow = owner;
                 }
+            }
+            if(newfollow >= 0) {
+                possiblefollow = newfollow;
+                eventtime = current_tick;
             }
         }
 
@@ -1408,6 +1416,12 @@ namespace game
         changemap(name, m_valid(nextmode) ? nextmode : (remote ? 0 : 1));
     }
     ICOMMAND(map, "s", (char *name), changemap(name));
+
+    void forceintermission()
+    {
+        if(!remote && !hasnonlocalclients()) server::startintermission();
+        else addmsg(N_FORCEINTERMISSION, "r");
+    }
 
     void forceedit(const char *name)
     {
@@ -1958,14 +1972,11 @@ namespace game
                 d->move = (physstate>>4)&2 ? -1 : (physstate>>4)&1;
                 d->strafe = (physstate>>6)&2 ? -1 : (physstate>>6)&1;
                 vec oldpos(d->o);
-                if(allowmove(d))
-                {
-                    d->o = o;
-                    d->o.z += d->eyeheight;
-                    d->vel = vel;
-                    d->falling = falling;
-                    d->physstate = physstate&7;
-                }
+                d->o = o;
+                d->o.z += d->eyeheight;
+                d->vel = vel;
+                d->falling = falling;
+                d->physstate = physstate&7;
                 updatephysstate(d);
                 updatepos(d);
                 if(smoothmove && d->smoothmillis>=0 && oldpos.dist(d->o) < smoothdist)
@@ -2050,8 +2061,14 @@ namespace game
 
     bool isdamgeignored(fpsent *f1, fpsent *f2) {
         if(!f1 || !f2) return true;
-        if(f1 == f2) return false;
+        if(f1 == f2) return true;
         return isteam(f1->team, f2->team);
+    }
+
+    void selfdamagerumble(int damage) {
+        damage = clamp(damage, 0, 100);
+        int time = 2*damage;
+        rumblehaptics(2, damage, time);
     }
 
     void adddmg(fpsent *target, fpsent *from, int damage, int gun) {
@@ -2078,6 +2095,9 @@ namespace game
         }
         if(from && !isdamgeignored(target, from) && gun >= 0 && gun < MAXWEAPONS) {
             from->detaileddamagedealt[gun] += damage;
+        }
+        if(target == player1) {
+            selfdamagerumble(damage);
         }
     }
 

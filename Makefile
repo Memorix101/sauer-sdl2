@@ -1,4 +1,4 @@
-CXXFLAGS= -O3 -fomit-frame-pointer -ffast-math -rdynamic
+CXXFLAGS= -O3 -fomit-frame-pointer -ffast-math
 ifdef _DEBUG
   CXXFLAGS+= -D_DEBUG=$(_DEBUG)
 endif
@@ -289,7 +289,7 @@ engine/console.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/console.o: shared/ents.h shared/command.h shared/iengine.h
 engine/console.o: shared/igame.h engine/world.h engine/glexts.h engine/octa.h
 engine/console.o: engine/lightmap.h engine/bih.h engine/texture.h
-engine/console.o: engine/model.h engine/varray.h
+engine/console.o: engine/model.h engine/varray.h engine/sdl2_keymap_extrakeys.h
 engine/cubeloader.o: engine/engine.h shared/cube.h shared/tools.h
 engine/cubeloader.o: shared/geom.h shared/ents.h shared/command.h
 engine/cubeloader.o: shared/iengine.h shared/igame.h engine/world.h
@@ -325,6 +325,7 @@ engine/main.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/main.o: shared/ents.h shared/command.h shared/iengine.h shared/igame.h
 engine/main.o: engine/world.h engine/glexts.h engine/octa.h engine/lightmap.h
 engine/main.o: engine/bih.h engine/texture.h engine/model.h engine/varray.h
+engine/main.o: engine/controllerdb.h
 engine/material.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/material.o: shared/ents.h shared/command.h shared/iengine.h
 engine/material.o: shared/igame.h engine/world.h engine/glexts.h

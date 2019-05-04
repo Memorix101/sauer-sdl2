@@ -205,7 +205,7 @@ VARF(sdl2_keymap_hack, 0, 1, 1, sdl2_keymap_hack_check());
 void keymap(int *code, char *key)
 {
     if(identflags&IDF_OVERRIDDEN) { conoutf(CON_ERROR, "cannot override keymap %d", *code); return; }
-    if(sdl2_keymap_hack_effective){
+    if(sdl2_keymap_hack_effective) {
         if(!keyms.numelems) loopi(arraylen(sdl2_keymap_extrakeys)){		//add tesseract imported keymap
             const sdl2_keymap& sdl2km = sdl2_keymap_extrakeys[i];
             keym &km = keyms[sdl2km.code];
@@ -586,6 +586,26 @@ void processkey(int code, bool isdown)
     keym *haskey = keyms.access(code);
     if(haskey && haskey->pressed) execbind(*haskey, isdown); // allow pressed keys to release
     else if(!g3d_key(code, isdown)) // 3D GUI mouse button intercept   
+    {
+        if(!consolekey(code, isdown))
+        {
+            if(haskey) execbind(*haskey, isdown);
+        }
+    }
+}
+
+void execgamepadbind(const char* name, bool isdown) {
+    char* sname = padbuttons.getshortname(name);
+    if(!sname) return;
+    int code = padbuttons.getcode(name);
+    if(!code) return;
+    // 0xFF00000b GP_GUIDE
+    if(code == (int)0xFF00000b) {
+        code = SDLK_ESCAPE;
+    }
+    keym *haskey = keyms.access(code);
+    if(haskey && haskey->pressed) execbind(*haskey, isdown); // allow pressed keys to release
+    else if(!g3d_key(code, isdown)) // 3D GUI mouse button intercept
     {
         if(!consolekey(code, isdown))
         {
